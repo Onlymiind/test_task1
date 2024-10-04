@@ -29,6 +29,7 @@ const (
 var (
 	ErrGroupNotFound = fmt.Errorf("group not found")
 	ErrSongNotFound  = fmt.Errorf("song not found")
+	ErrEmptyFilter   = fmt.Errorf("empty filter")
 )
 
 type Db struct {
@@ -289,8 +290,77 @@ type LibraryEntry struct {
 	SongName  string
 }
 
-func (db *Db) GetAll(page_idx, page_size int) ([]LibraryEntry, error) {
-	return nil, nil
+func (db *Db) GetAll(page_idx, page_size uint) ([]LibraryEntry, error) {
+	db.logger.Info("retrieving library data, page ", page_idx, ", page size ", page_size)
+	rows, err := db.connection.Query(get_library_query, page_size, page_idx*page_size)
+	defer rows.Close()
+	if err != nil {
+		db.logger.Error("failed to retrieve library: ", err.Error())
+		return nil, err
+	}
+	var result []LibraryEntry
+	buffer := LibraryEntry{}
+	for rows.Next() {
+		err = rows.Scan(&buffer.GroupName, &buffer.SongName)
+		if err != nil {
+			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result))
+			return result, err
+		}
+		db.logger.Debug("adding entry: group '", buffer.GroupName, "', song '", buffer.SongName, "'")
+		result = append(result, buffer)
+	}
+
+	return result, nil
+}
+
+func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) ([]LibraryEntry, error) {
+	db.logger.Info("retrieving filtered library data, group '", group,
+		"' song '", song, "', page ", page_idx, ", page size ", page_size)
+	if group == "" && song == "" {
+		db.logger.Info("filter is empty")
+		return db.GetAll(page_idx, page_size)
+	}
+
+	query := get_library_filter_base
+	arg_idx := 1
+	if group != "" {
+		query += fmt.Sprintf(get_library_filter_group_fmt, arg_idx)
+		arg_idx++
+	}
+	if song != "" {
+		query += fmt.Sprintf(get_library_filter_song_fmt, arg_idx)
+		arg_idx++
+	}
+	query += fmt.Sprintf(get_library_filter_pagination_fmt, arg_idx, arg_idx+1)
+	db.logger.Debug("resulting query: ", query)
+
+	var rows *pgx.Rows
+	var err error
+	if group == "" {
+		rows, err = db.connection.Query(query, song, page_size, page_idx*page_size)
+	} else if song == "" {
+		rows, err = db.connection.Query(query, group, page_size, page_idx*page_size)
+	} else {
+		rows, err = db.connection.Query(query, group, song, page_size, page_idx*page_size)
+	}
+	defer rows.Close()
+	if err != nil {
+		db.logger.Error("failed to retrieve library: ", err.Error())
+		return nil, err
+	}
+	var result []LibraryEntry
+	buffer := LibraryEntry{}
+	for rows.Next() {
+		err = rows.Scan(&buffer.GroupName, &buffer.SongName)
+		if err != nil {
+			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result))
+			return result, err
+		}
+		db.logger.Debug("adding entry: group '", buffer.GroupName, "', song '", buffer.SongName, "'")
+		result = append(result, buffer)
+	}
+
+	return result, nil
 }
 
 func (db *Db) Close() {
