@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: Онлайн библиотека песен
+  description: |
+    ## Использование:
+    `<server> <путь к .env файлу>`
+    
+    ## Переменные конфигурации:
+    - ADDRESS - TCP адрес сервера
+    - DB_USER - пользователь базы данных
+    - DB_PORT - порт для подключения к базе данных
+    - DB_PASSWORD - пароль для подключения к базе данных
+    - DB_HOST - хост для подключения к базе данных
+    - DB_NAME - имя базы данных
+    - DB_MIGRATIONS_PATH - путь к директории с SQL-файлами для инициализации и миграции базы данных
+    - LOG_FILE - путь к файлу с логами (дефолтный - `./.log.txt`)
+  version: 1.0.0
+paths:
+  /add:
+    post:
+      summary: Добавить новую песню в библиотеку
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddSong'
+        required: true
+      responses:
+        '200':
+          description: Песня добавлена успешно
+        '400':
+          description: Невалидный вормат запроса или невалидные данные
+        '500':
+          description: Ошибка сервера
+  /get_all:
+    get:
+      summary: Получение данных библиотеки с фильтрацией по дате релиза, группе и названию песни
+      parameters:
+        - name: group
+          in: query
+          required: false
+          description: Название группы для фильтрации
+          schema:
+            type: string
+            example: GroupName
+        - name: song
+          in: query
+          required: false
+          description: Название песни для фильтрации
+          schema:
+            type: string
+            example: SongName
+        - name: release_date
+          in: query
+          required: false
+          description: Дата релиза для фильтрации
+          schema:
+            type: string
+            example: 18.01.2006
+      responses:
+        '200':
+          description: Ok
+          content: 
+            application/json:
+              schema: 
+                $ref: '#/components/schemas/LibraryPage'
+        '400':
+          description: Невалидный вормат запроса или невалидные данные
+        '500':
+          description: Ошибка сервера
+  /get_song:
+    get:
+      summary: Получение данных библиотеки с фильтрацией по дате релиза, группе и названию песни
+      parameters:
+        - name: group
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: song
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ok
+          content: 
+            application/json:
+              schema: 
+                $ref: '#/components/schemas/SongText'
+        '400':
+          description: Невалидный вормат запроса или невалидные данные
+        '404':
+          description: Группа и/или песня не найдены
+        '500':
+          description: Ошибка сервера
+  /delete:
+    post:
+      summary: Удалить песню из библиотеки
+      requestBody:
+        description: Update an existent pet in the store
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddSong'
+        required: true
+      responses:
+        '200':
+          description: Песня удалена
+        '400':
+          description: Невалидный вормат запроса или невалидные данные
+        '404':
+          description: Группа не найдена
+        '500':
+          description: Ошибка сервера
+  /change_song:
+    post:
+      summary: Изменить данные песни
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeSong'
+        required: true
+      responses:
+        '200':
+          description: Данные песни успешно изменены
+        '400':
+          description: Невалидный вормат запроса или невалидные данные
+        '404':
+          description: Группа и/или песня не найдены
+        '500':
+          description: Ошибка сервера
+components:
+  schemas:
+    AddSong:
+      type: object
+      required:
+        - group
+        - song
+      properties:
+        group:
+          type: string
+          example: Muse
+        song:
+          type: string
+          example: Supermassive Black Hole
+    SongText:
+      type: object
+      required:
+      - page_idx
+      - page_count
+      - verse
+      properties:
+        page_idx:
+          type: integer
+        page_count:
+          type: integer
+        verse:
+          type: string
+          example: Ooh baby, don't you know I suffer?\nOoh baby, can you hear me moan?\nYou caught me under false pretenses\nHow long before you let me go?
+    LibraryPage:
+      type: object
+      required:
+      - page_idx
+      - page_count
+      - entries
+      properties:
+        page_idx:
+          type: integer
+        page_count:
+          type: integer
+        entries:
+          type: array
+          items: 
+            $ref: '#/components/schemas/LibraryEntry'
+    LibraryEntry:
+      type: object
+      required:
+      - song
+      - group
+      - release_date
+      properties:
+        song:
+          type: string
+          example: Supermassive Black Hole
+        group:
+          type: string
+          example: Muse
+        release_date:
+          type: string
+          example: 18.01.2006
+    ChangeSong:
+      type: object
+      required:
+      - song
+      properties:
+        song: 
+          $ref: '#/components/schemas/LibraryEntry'
+        new_name:
+          type: string
+          example: New Song Name
+        new_group:
+          type: string
+          example: New Group Name
+        new_release_date:
+          type: string
+          example: 18.01.2006
+        new_url:
+          type: string
+          example: 'https://example.com/some_song'

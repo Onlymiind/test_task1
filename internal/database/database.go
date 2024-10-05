@@ -524,7 +524,7 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 	buffer := LibraryEntry{}
 	time_buffer := time.Time{}
 	for rows.Next() {
-		err = rows.Scan(&buffer.Group, &buffer.Song, &buffer.ReleaseDate, &time_buffer)
+		err = rows.Scan(&buffer.Group, &buffer.Song, &time_buffer)
 		if err != nil {
 			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
 			return LibraryPage{}, err
