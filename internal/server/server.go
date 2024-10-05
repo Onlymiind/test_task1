@@ -10,6 +10,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Onlymiind/test_task/internal/database"
 	"github.com/Onlymiind/test_task/internal/logger"
@@ -28,6 +29,7 @@ const (
 	page_idx_key      = "page_idx"
 	song_key          = "song"
 	group_key         = "group"
+	release_date_key  = "release_date"
 )
 
 var ErrWrongArgument = fmt.Errorf("wrong argument type")
@@ -39,17 +41,24 @@ type Server struct {
 }
 
 type changeSongRequest struct {
-	Song     database.LibraryEntry `json:"song"`
-	NewGroup string                `json:"new_group"`
-	NewName  string                `json:"new_name"`
-	NewText  string                `json:"new_text"`
-	NewURL   string                `json:"new_url"`
+	Song           database.LibraryEntry `json:"song"`
+	NewGroup       string                `json:"new_group"`
+	NewName        string                `json:"new_name"`
+	NewText        string                `json:"new_text"`
+	NewURL         string                `json:"new_url"`
+	NewReleaseDate string                `json:"new_release_date"`
 }
 
 type songTextResponse struct {
-	PageIndex int `json:"page_idx"`
-	PageCount int `json:"page_count"`
-	Verse     string
+	PageIndex int    `json:"page_idx"`
+	PageCount int    `json:"page_count"`
+	Verse     string `json:"verse"`
+}
+
+type songData struct {
+	Text        string `json:"text"`
+	ReleaseDate string `json:"release_date"`
+	URL         string `json:"url"`
 }
 
 func Init(db *database.Db, song_info_url string, logger *logger.Logger) {
@@ -99,8 +108,23 @@ func (s *Server) getAll(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		return
 	}
+	var date *time.Time
+	if len(query[release_date_key]) != 0 {
+		if len(query[release_date_key]) != 1 {
+			s.logger.Error("expected exactly one value for ", release_date_key, " get parameter, got ", len(query[release_date_key]))
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		date_val, err := time.Parse("02.01.2006", query[release_date_key][0])
+		if err != nil {
+			s.logger.Error("failed to parse release date: ", err.Error())
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		date = &date_val
+	}
 
-	result, err := s.db.GetFiltered(group_filter, song_filter, page_idx, page_size)
+	result, err := s.db.GetFiltered(group_filter, song_filter, page_idx, page_size, date)
 	if err != nil {
 		s.writeDBResponse(err, writer)
 		return
@@ -203,8 +227,19 @@ func (s *Server) changeSong(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	var date *time.Time
+	if data.NewReleaseDate != "" {
+		date_val, err := time.Parse("02.01.2006", data.NewReleaseDate)
+		if err != nil {
+			s.logger.Error("failed to parse release date: ", err.Error())
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		date = &date_val
+	}
+
 	if s.writeDBResponse(s.db.UpdateSong(data.Song, data.NewGroup, data.NewName,
-		data.NewText, data.NewURL), writer) {
+		data.NewText, data.NewURL, date), writer) {
 		s.logger.Info("success")
 	}
 }
@@ -237,8 +272,55 @@ func (s *Server) addSong(writer http.ResponseWriter, request *http.Request) {
 	request_url := path.Join(s.song_info_url, song_info_path)
 	request_url += "?" + get_params.Encode()
 	s.logger.Info("sending song info request to: ", request_url)
+	response, err := http.Get(request_url)
+	if err != nil {
+		s.logger.Error("failed to get song info: ", err.Error())
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	} else if response.StatusCode != http.StatusOK {
+		s.logger.Error("failed to get song info, response status: ", response.Status)
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	} else if response.Header.Get("content-type") != "application/json" {
+		s.logger.Error("unexpected content type in response")
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
-	s.logger.Info("success")
+	body = make([]byte, response.ContentLength)
+	_, err = response.Body.Read(body)
+	if err != nil && err != io.EOF {
+		s.logger.Error("failed to read response body: ", err.Error())
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	song_data := songData{}
+	err = json.Unmarshal(body, &song_data)
+	if err != nil {
+		s.logger.Error("failed to parse the response: ", err.Error())
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if song_data.Text == "" {
+		s.logger.Error("song text empty")
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	} else if song_data.URL == "" {
+		s.logger.Error("song url empty")
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	date, err := time.Parse("02.01.2006", song_data.ReleaseDate)
+	if err != nil {
+		s.logger.Error("failed to parse release date")
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if s.writeDBResponse(s.db.AddSong(song.Group, song.Song, song_data.Text, song_data.URL, date), writer) {
+		s.logger.Info("success")
+	}
+
 }
 
 func (s *Server) validateRequestMethod(method, expected string, writer http.ResponseWriter) bool {

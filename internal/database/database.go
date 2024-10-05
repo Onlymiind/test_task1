@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"time"
 
 	"github.com/Onlymiind/test_task/internal/logger"
 	"github.com/golang-migrate/migrate"
@@ -23,22 +24,25 @@ const (
 	get_library_count_query = "get_all_count"
 	get_song_id_query       = "get_song_id"
 
-	get_library_filter_base           = "SELECT name, song_name FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
-	get_library_filter_count_base     = "SELECT COUNT(*) FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
-	get_library_filter_group_fmt      = " name LIKE $%d"
-	get_library_filter_song_fmt       = " song_name LIKE $%d"
-	get_library_filter_count_end      = ";"
-	get_library_filter_pagination_fmt = " ORDER BY name, song_name LIMIT $%d OFFSET $%d;"
+	get_library_filter_base             = "SELECT name, song_name, release_date FROM groups JOIN songs ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id WHERE"
+	get_library_filter_count_base       = "SELECT COUNT(*) FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
+	get_library_filter_group_fmt        = " name LIKE $%d"
+	get_library_filter_song_fmt         = " song_name LIKE $%d"
+	get_library_filter_release_date_fmt = " release_date = $%d"
+	get_library_filter_count_end        = ";"
+	get_library_filter_pagination_fmt   = " ORDER BY name, song_name, release_date LIMIT $%d OFFSET $%d;"
 
-	update_song_base      = "UPDATE songs SET"
-	update_song_group_fmt = " group_id = $%d"
-	update_song_name_fmt  = " song_name = $%d"
-	update_song_end_fmt   = " WHERE id = $%d;"
+	update_song_base             = "UPDATE songs SET"
+	update_song_group_fmt        = " group_id = $%d"
+	update_song_name_fmt         = " song_name = $%d"
+	update_song_release_date_fmt = " release_date = $%d"
+	update_song_end_fmt          = " WHERE id = $%d;"
 
-	update_song_info_base     = "UPDATE song_info SET"
-	update_song_info_text_fmt = " lyrics = $%d"
-	update_song_info_url_fmt  = " url = $%d"
-	update_song_info_end_fmt  = " WHERE song_id = $%d;"
+	update_song_info_base             = "UPDATE song_info SET"
+	update_song_info_text_fmt         = " lyrics = $%d"
+	update_song_info_url_fmt          = " url = $%d"
+	update_song_info_release_date_fmt = " release_date = $%d"
+	update_song_info_end_fmt          = " WHERE song_id = $%d;"
 )
 
 var (
@@ -55,8 +59,9 @@ type Db struct {
 	logger     *logger.Logger
 }
 type LibraryEntry struct {
-	Group string `json:"group"`
-	Song  string `json:"song"`
+	Group       string `json:"group"`
+	Song        string `json:"song"`
+	ReleaseDate string `json:"release_date"`
 }
 
 type LibraryPage struct {
@@ -130,7 +135,7 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 		logger.Error("failed to prepare ", add_song_query, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(add_song_info_query, "INSERT INTO song_info(song_id, lyrics, url) VALUES($1, $2, $3);")
+	_, err = connection.Prepare(add_song_info_query, "INSERT INTO song_info(song_id, lyrics, url, release_date) VALUES($1, $2, $3, $4);")
 	if err != nil {
 		logger.Error("failed to prepare ", add_song_info_query, " query: ", err.Error())
 		return nil
@@ -146,14 +151,14 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 		logger.Error("failed to prepare ", delete_song_query, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_library_query, "SELECT name, song_name FROM groups JOIN songs"+
-		" ON groups.id = songs.group_id ORDER BY name, song_name LIMIT $1 OFFSET $2;")
+	_, err = connection.Prepare(get_library_query, "SELECT name, song_name, release_date FROM groups JOIN songs"+
+		" ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id ORDER BY name, song_name, release_date LIMIT $1 OFFSET $2;")
 	if err != nil {
 		logger.Error("failed to prepare ", get_library_query, " query: ", err.Error())
 		return nil
 	}
 	_, err = connection.Prepare(get_library_count_query, "SELECT COUNT(*) FROM groups JOIN songs"+
-		" ON groups.id = songs.group_id ORDER BY name, song_name;")
+		" ON groups.id = songs.group_id;")
 	if err != nil {
 		logger.Error("failed to prepare ", get_library_count_query, " query: ", err.Error())
 		return nil
@@ -269,12 +274,14 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 	}
 	result := LibraryPage{PageCount: page_count, PageIndex: page_idx}
 	buffer := LibraryEntry{}
+	time_buffer := time.Time{}
 	for rows.Next() {
-		err = rows.Scan(&buffer.Group, &buffer.Song)
+		err = rows.Scan(&buffer.Group, &buffer.Song, &time_buffer)
 		if err != nil {
 			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
 			return LibraryPage{}, err
 		}
+		buffer.ReleaseDate = time_buffer.Format("02.01.2006")
 		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
 		result.Entries = append(result.Entries, buffer)
 	}
@@ -287,7 +294,7 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 	return result, nil
 }
 
-func (db *Db) AddSong(group string, name string, text string, url string) error {
+func (db *Db) AddSong(group string, name string, text string, url string, date time.Time) error {
 	if group == "" || name == "" || text == "" || url == "" {
 		db.logger.Error("invalid use of AddSong: one of the parameters is empty")
 		return ErrInvalidData
@@ -322,7 +329,7 @@ func (db *Db) AddSong(group string, name string, text string, url string) error 
 		db.logger.Error("failed to retrieve song id from query result: ", err.Error())
 		return err
 	}
-	_, err = db.connection.Exec(add_song_info_query, song_id, text, url)
+	_, err = db.connection.Exec(add_song_info_query, song_id, text, url, date.Format("2006-01-02"))
 	if err != nil {
 		db.logger.Error("failed to add song details: ", err.Error())
 		return err
@@ -422,7 +429,7 @@ func (db *Db) DeleteSong(song LibraryEntry) error {
 	return nil
 }
 
-func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (LibraryPage, error) {
+func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_date *time.Time) (LibraryPage, error) {
 	db.logger.Info("retrieving filtered library data, group '", group,
 		"' song '", song, "', page ", page_idx, ", page size ", page_size)
 	if group == "" && song == "" {
@@ -437,7 +444,7 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 		filter_group := fmt.Sprintf(get_library_filter_group_fmt, arg_idx)
 		query += filter_group
 		count_query += filter_group
-		if song != "" {
+		if song != "" || release_date != nil {
 			query += " AND"
 			count_query += " AND"
 		}
@@ -447,6 +454,16 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 		filter_song := fmt.Sprintf(get_library_filter_song_fmt, arg_idx)
 		query += filter_song
 		count_query += filter_song
+		arg_idx++
+		if release_date != nil {
+			query += " AND"
+			count_query += " AND"
+		}
+	}
+	if release_date != nil {
+		filter_date := fmt.Sprintf(get_library_filter_release_date_fmt, arg_idx)
+		query += filter_date
+		count_query += filter_date
 		arg_idx++
 	}
 	query += fmt.Sprintf(get_library_filter_pagination_fmt, arg_idx, arg_idx+1)
@@ -462,12 +479,16 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 
 	// validate page index
 	var count_rows *pgx.Rows
-	if group == "" {
+	if group == "" && release_date == nil {
 		count_rows, err = transaction.Query(count_query, song)
-	} else if song == "" {
+	} else if song == "" && release_date == nil {
 		count_rows, err = transaction.Query(query, group)
-	} else {
+	} else if release_date == nil {
 		count_rows, err = transaction.Query(query, group, song)
+	} else if group == "" && song == "" {
+		count_rows, err = transaction.Query(count_query, *release_date)
+	} else {
+		count_rows, err = transaction.Query(query, group, song, *release_date)
 	}
 	defer count_rows.Close()
 	if err != nil {
@@ -482,12 +503,16 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 
 	// get data
 	var rows *pgx.Rows
-	if group == "" {
+	if group == "" && release_date == nil {
 		rows, err = transaction.Query(query, song, page_size, page_idx*page_size)
-	} else if song == "" {
+	} else if song == "" && release_date == nil {
 		rows, err = transaction.Query(query, group, page_size, page_idx*page_size)
-	} else {
+	} else if release_date == nil {
 		rows, err = transaction.Query(query, group, song, page_size, page_idx*page_size)
+	} else if group == "" && song == "" {
+		rows, err = transaction.Query(query, release_date, page_size, page_idx*page_size)
+	} else {
+		rows, err = transaction.Query(query, group, song, release_date, page_size, page_idx*page_size)
 	}
 	defer rows.Close()
 	if err != nil {
@@ -497,12 +522,14 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 
 	result := LibraryPage{PageCount: page_count, PageIndex: page_idx}
 	buffer := LibraryEntry{}
+	time_buffer := time.Time{}
 	for rows.Next() {
-		err = rows.Scan(&buffer.Group, &buffer.Song)
+		err = rows.Scan(&buffer.Group, &buffer.Song, &buffer.ReleaseDate, &time_buffer)
 		if err != nil {
 			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
 			return LibraryPage{}, err
 		}
+		buffer.ReleaseDate = time_buffer.Format("02.01.2006")
 		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
 		result.Entries = append(result.Entries, buffer)
 	}
@@ -514,11 +541,11 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 	return result, nil
 }
 
-func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_url string) error {
+func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_url string, new_release_date *time.Time) error {
 	if song.Group == "" || song.Song == "" {
 		db.logger.Error("invalid use of UpdateSong: group and/or song name is empty")
 		return ErrInvalidData
-	} else if new_group == "" && new_name == "" && new_text == "" && new_url == "" {
+	} else if new_group == "" && new_name == "" && new_text == "" && new_url == "" && new_release_date == nil {
 		// nothing to update
 		db.logger.Debug("empty update: group '", song.Group, "', song '", song.Song, "'")
 		return nil
@@ -565,7 +592,7 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 				return err
 			}
 			update_song_query += fmt.Sprintf(update_song_group_fmt, arg_idx)
-			if new_name != "" {
+			if new_name != "" || new_release_date != nil {
 				update_song_query += ","
 			}
 			arg_idx++
@@ -573,17 +600,29 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 		if new_name != "" {
 			db.logger.Info("new song name: '", new_name, "'")
 			update_song_query += fmt.Sprintf(update_song_name_fmt, arg_idx)
+			if new_release_date != nil {
+				update_song_query += ","
+			}
+			arg_idx++
+		}
+		if new_release_date != nil {
+			db.logger.Info("new release date: ", new_release_date.Format("02.01.2006"))
+			update_song_query += fmt.Sprintf(update_song_info_release_date_fmt, arg_idx)
 			arg_idx++
 		}
 		update_song_query += fmt.Sprintf(update_song_end_fmt, arg_idx)
 		db.logger.Debug("resulting query: ", update_song_query)
 
-		if new_group == "" {
+		if new_group == "" && new_release_date == nil {
 			_, err = transaction.Exec(update_song_query, new_name, song_id)
-		} else if new_name == "" {
+		} else if new_name == "" && new_release_date == nil {
 			_, err = transaction.Exec(update_song_query, new_group_id, song_id)
-		} else {
+		} else if new_release_date == nil {
 			_, err = transaction.Exec(update_song_query, new_group_id, new_name, song_id)
+		} else if new_group == "" && new_name == "" {
+			_, err = transaction.Exec(update_song_query, new_release_date, song_id)
+		} else {
+			_, err = transaction.Exec(update_song_query, new_group_id, new_name, new_release_date, song_id)
 		}
 		if err != nil {
 			db.logger.Error("failed to update song: ", err.Error())

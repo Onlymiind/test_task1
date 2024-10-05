@@ -1,0 +1,1 @@
+ALTER TABLE song_info ADD COLUMN IF NOT EXISTS release_date date NOT NULL;
