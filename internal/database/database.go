@@ -60,8 +60,9 @@ type LibraryEntry struct {
 }
 
 type LibraryPage struct {
-	PageCount uint
-	Entries   []LibraryEntry
+	PageIndex uint           `json:"page_idx"`
+	PageCount uint           `json:"page_count"`
+	Entries   []LibraryEntry `json:"entries"`
 }
 
 func Init(user, password, host string, port uint16, db_name, migrations_path string, logger *logger.Logger) *Db {
@@ -266,7 +267,7 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 		db.logger.Error("failed to retrieve library: ", err.Error())
 		return LibraryPage{}, err
 	}
-	result := LibraryPage{PageCount: page_count}
+	result := LibraryPage{PageCount: page_count, PageIndex: page_idx}
 	buffer := LibraryEntry{}
 	for rows.Next() {
 		err = rows.Scan(&buffer.Group, &buffer.Song)
@@ -494,7 +495,7 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (Library
 		return LibraryPage{}, err
 	}
 
-	result := LibraryPage{PageCount: page_count}
+	result := LibraryPage{PageCount: page_count, PageIndex: page_idx}
 	buffer := LibraryEntry{}
 	for rows.Next() {
 		err = rows.Scan(&buffer.Group, &buffer.Song)
