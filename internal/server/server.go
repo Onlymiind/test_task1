@@ -88,7 +88,7 @@ func (s *Server) addSong(writer http.ResponseWriter, request *http.Request) {
 		s.logger.Error("failed to read request's body")
 		return
 	}
-	song := song_info{}
+	song := database.LibraryEntry{}
 	err = json.Unmarshal(body, &song)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
@@ -100,9 +100,4 @@ func (s *Server) addSong(writer http.ResponseWriter, request *http.Request) {
 	request_url := url.URL{Scheme: "http", Host: s.song_info_url, Path: song_info_path, RawQuery: get_params.Encode()}
 	s.logger.Info("sending song info request to: ", request_url.String())
 
-}
-
-type song_info struct {
-	Song  string `json:"song"`
-	Group string `json:"group"`
 }
