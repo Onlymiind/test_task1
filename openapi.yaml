@@ -14,6 +14,12 @@ info:
     - DB_NAME - имя базы данных
     - DB_MIGRATIONS_PATH - путь к директории с SQL-файлами для инициализации и миграции базы данных
     - LOG_FILE - путь к файлу с логами (дефолтный - `./.log.txt`)
+    ## Зависимости:
+    - Go 1.23
+    - PostgreSQL 17
+    - pgx (`github.com/jackc/pgx`)
+    - godotenv (`github.com/joho/godotenv`)
+    - golang-migrate (`github.com/golang-migrate/migrate`)
   version: 1.0.0
 paths:
   /add:
