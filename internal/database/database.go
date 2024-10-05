@@ -13,18 +13,21 @@ import (
 )
 
 const (
-	add_song_query      = "add_song"
-	add_song_info_query = "add_song_info"
-	add_group_query     = "add_group"
-	get_group_id_query  = "get_group"
-	get_song_text_query = "get_song_text"
-	delete_song_query   = "delete_song"
-	get_library_query   = "get_all"
-	get_song_id_query   = "get_song_id"
+	add_song_query          = "add_song"
+	add_song_info_query     = "add_song_info"
+	add_group_query         = "add_group"
+	get_group_id_query      = "get_group"
+	get_song_text_query     = "get_song_text"
+	delete_song_query       = "delete_song"
+	get_library_query       = "get_all"
+	get_library_count_query = "get_all_count"
+	get_song_id_query       = "get_song_id"
 
 	get_library_filter_base           = "SELECT name, song_name FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
+	get_library_filter_count_base     = "SELECT COUNT(*) FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
 	get_library_filter_group_fmt      = " name LIKE $%d"
 	get_library_filter_song_fmt       = " song_name LIKE $%d"
+	get_library_filter_count_end      = ";"
 	get_library_filter_pagination_fmt = " ORDER BY name, song_name LIMIT $%d OFFSET $%d;"
 
 	update_song_base      = "UPDATE songs SET"
@@ -39,10 +42,12 @@ const (
 )
 
 var (
-	ErrGroupNotFound = fmt.Errorf("group not found")
-	ErrSongNotFound  = fmt.Errorf("song not found")
-	ErrEmptyFilter   = fmt.Errorf("empty filter")
-	ErrInvalidData   = fmt.Errorf("invalid data")
+	ErrGroupNotFound   = fmt.Errorf("group not found")
+	ErrSongNotFound    = fmt.Errorf("song not found")
+	ErrEmptyFilter     = fmt.Errorf("empty filter")
+	ErrInvalidData     = fmt.Errorf("invalid data")
+	ErrPageOutOfBounds = fmt.Errorf("page out of bounds")
+	ErrNoOutput        = fmt.Errorf("expected one row of output")
 )
 
 type Db struct {
@@ -52,6 +57,11 @@ type Db struct {
 type LibraryEntry struct {
 	Group string `json:"group"`
 	Song  string `json:"song"`
+}
+
+type LibraryPage struct {
+	PageCount uint
+	Entries   []LibraryEntry
 }
 
 func Init(user, password, host string, port uint16, db_name, migrations_path string, logger *logger.Logger) *Db {
@@ -141,6 +151,12 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 		logger.Error("failed to prepare ", get_library_query, " query: ", err.Error())
 		return nil
 	}
+	_, err = connection.Prepare(get_library_count_query, "SELECT COUNT(*) FROM groups JOIN songs"+
+		" ON groups.id = songs.group_id ORDER BY name, song_name;")
+	if err != nil {
+		logger.Error("failed to prepare ", get_library_count_query, " query: ", err.Error())
+		return nil
+	}
 	_, err = connection.Prepare(get_song_id_query, "SELECT id FROM songs WHERE song_name = $1"+
 		" AND group_id = (SELECT id FROM groups WHERE name = $2);")
 	if err != nil {
@@ -184,6 +200,11 @@ func (db *Db) getOrAddGroupID(name string, transaction *pgx.Tx) (int64, error) {
 			db.logger.Error("failed to add new group: ", err.Error())
 			return -1, err
 		}
+		if !rows.Next() {
+			db.logger.Error(ErrNoOutput.Error())
+			return -1, ErrNoOutput
+		}
+
 		err = rows.Scan(&group_id)
 		if err != nil {
 			db.logger.Error("failed to read group id from query result: ", err.Error())
@@ -191,6 +212,78 @@ func (db *Db) getOrAddGroupID(name string, transaction *pgx.Tx) (int64, error) {
 		}
 	}
 	return group_id, nil
+}
+
+func (db *Db) validatePageIndex(query_result *pgx.Rows, page_idx, page_size uint) (uint, error) {
+	if !query_result.Next() {
+		db.logger.Error(ErrNoOutput.Error())
+		return 0, ErrNoOutput
+	}
+	var count int64
+	if err := query_result.Scan(&count); err != nil {
+		db.logger.Error("failed to retrieve count: ", err.Error())
+		return 0, err
+	}
+	max_page := count / int64(page_size)
+	if count%int64(page_size) != 0 {
+		max_page++
+	}
+	if int64(page_idx) >= max_page {
+		db.logger.Error("page ", page_idx, " out of bounds, max page: ", max_page)
+		return 0, ErrPageOutOfBounds
+	}
+	return uint(max_page) + 1, nil
+}
+
+func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
+	//TODO: page count
+	db.logger.Info("retrieving library data, page ", page_idx, ", page size ", page_size)
+
+	transaction, err := db.connection.Begin()
+	if err != nil {
+		db.logger.Error("failed to start transaction: ", err.Error())
+		return LibraryPage{}, err
+	}
+	defer transaction.Rollback()
+
+	// validate page index
+	count_rows, err := transaction.Query(get_library_count_query)
+	defer count_rows.Close()
+	if err != nil {
+		db.logger.Error("failed to get library entries count: ", err.Error())
+		return LibraryPage{}, err
+	}
+	page_count, err := db.validatePageIndex(count_rows, page_idx, page_size)
+	if err != nil {
+		return LibraryPage{}, err
+	}
+	count_rows.Close()
+
+	// get the result
+	rows, err := transaction.Query(get_library_query, page_size, page_idx*page_size)
+	defer rows.Close()
+	if err != nil {
+		db.logger.Error("failed to retrieve library: ", err.Error())
+		return LibraryPage{}, err
+	}
+	result := LibraryPage{PageCount: page_count}
+	buffer := LibraryEntry{}
+	for rows.Next() {
+		err = rows.Scan(&buffer.Group, &buffer.Song)
+		if err != nil {
+			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
+			return LibraryPage{}, err
+		}
+		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
+		result.Entries = append(result.Entries, buffer)
+	}
+
+	err = transaction.Commit()
+	if err != nil {
+		db.logger.Error("failed to commit transaction: ", err.Error())
+		return LibraryPage{}, err
+	}
+	return result, nil
 }
 
 func (db *Db) AddSong(group string, name string, text string, url string) error {
@@ -328,82 +421,95 @@ func (db *Db) DeleteSong(song LibraryEntry) error {
 	return nil
 }
 
-func (db *Db) GetAll(page_idx, page_size uint) ([]LibraryEntry, error) {
-	//TODO: page count
-	db.logger.Info("retrieving library data, page ", page_idx, ", page size ", page_size)
-	rows, err := db.connection.Query(get_library_query, page_size, page_idx*page_size)
-	defer rows.Close()
-	if err != nil {
-		db.logger.Error("failed to retrieve library: ", err.Error())
-		return nil, err
-	}
-	var result []LibraryEntry
-	buffer := LibraryEntry{}
-	for rows.Next() {
-		err = rows.Scan(&buffer.Group, &buffer.Song)
-		if err != nil {
-			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result))
-			return result, err
-		}
-		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
-		result = append(result, buffer)
-	}
-
-	return result, nil
-}
-
-func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) ([]LibraryEntry, error) {
-	//TODO: page count
+func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) (LibraryPage, error) {
 	db.logger.Info("retrieving filtered library data, group '", group,
 		"' song '", song, "', page ", page_idx, ", page size ", page_size)
 	if group == "" && song == "" {
 		db.logger.Info("filter is empty")
-		return db.GetAll(page_idx, page_size)
+		return db.getAll(page_idx, page_size)
 	}
 
 	query := get_library_filter_base
+	count_query := get_library_filter_count_base
 	arg_idx := 1
 	if group != "" {
-		query += fmt.Sprintf(get_library_filter_group_fmt, arg_idx)
+		filter_group := fmt.Sprintf(get_library_filter_group_fmt, arg_idx)
+		query += filter_group
+		count_query += filter_group
 		if song != "" {
 			query += " AND"
+			count_query += " AND"
 		}
 		arg_idx++
 	}
 	if song != "" {
-		query += fmt.Sprintf(get_library_filter_song_fmt, arg_idx)
+		filter_song := fmt.Sprintf(get_library_filter_song_fmt, arg_idx)
+		query += filter_song
+		count_query += filter_song
 		arg_idx++
 	}
 	query += fmt.Sprintf(get_library_filter_pagination_fmt, arg_idx, arg_idx+1)
+	count_query += get_library_filter_count_end
 	db.logger.Debug("resulting query: ", query)
 
-	var rows *pgx.Rows
-	var err error
+	transaction, err := db.connection.Begin()
+	if err != nil {
+		db.logger.Error("failed to start transaction: ", err.Error())
+		return LibraryPage{}, err
+	}
+	defer transaction.Rollback()
+
+	// validate page index
+	var count_rows *pgx.Rows
 	if group == "" {
-		rows, err = db.connection.Query(query, song, page_size, page_idx*page_size)
+		count_rows, err = transaction.Query(count_query, song)
 	} else if song == "" {
-		rows, err = db.connection.Query(query, group, page_size, page_idx*page_size)
+		count_rows, err = transaction.Query(query, group)
 	} else {
-		rows, err = db.connection.Query(query, group, song, page_size, page_idx*page_size)
+		count_rows, err = transaction.Query(query, group, song)
+	}
+	defer count_rows.Close()
+	if err != nil {
+		db.logger.Error("failed to get library entries count: ", err.Error())
+		return LibraryPage{}, err
+	}
+	page_count, err := db.validatePageIndex(count_rows, page_idx, page_size)
+	if err != nil {
+		return LibraryPage{}, err
+	}
+	count_rows.Close()
+
+	// get data
+	var rows *pgx.Rows
+	if group == "" {
+		rows, err = transaction.Query(query, song, page_size, page_idx*page_size)
+	} else if song == "" {
+		rows, err = transaction.Query(query, group, page_size, page_idx*page_size)
+	} else {
+		rows, err = transaction.Query(query, group, song, page_size, page_idx*page_size)
 	}
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to retrieve library: ", err.Error())
-		return nil, err
+		return LibraryPage{}, err
 	}
 
-	var result []LibraryEntry
+	result := LibraryPage{PageCount: page_count}
 	buffer := LibraryEntry{}
 	for rows.Next() {
 		err = rows.Scan(&buffer.Group, &buffer.Song)
 		if err != nil {
-			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result))
-			return result, err
+			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
+			return LibraryPage{}, err
 		}
 		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
-		result = append(result, buffer)
+		result.Entries = append(result.Entries, buffer)
 	}
 
+	if err = transaction.Commit(); err != nil {
+		db.logger.Error("failed to commit transaction: ", err.Error())
+		return LibraryPage{}, err
+	}
 	return result, nil
 }
 
