@@ -141,7 +141,7 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 		logger.Error("failed to prepare ", get_library_query, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_song_id_query, "SELECT id FROM songs WHERE name = $1"+
+	_, err = connection.Prepare(get_song_id_query, "SELECT id FROM songs WHERE song_name = $1"+
 		" AND group_id = (SELECT id FROM groups WHERE name = $2);")
 	if err != nil {
 		logger.Error("failed to prepare ", get_song_id_query, " query: ", err.Error())
@@ -213,6 +213,7 @@ func (db *Db) AddSong(group string, name string, text string, url string) error 
 		return err
 	}
 	rows, err := db.connection.Query(add_song_query, group_id, name)
+	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to add song: ", err.Error())
 		return err
@@ -238,6 +239,7 @@ func (db *Db) AddSong(group string, name string, text string, url string) error 
 		db.logger.Error("failed to commit transaction: ", err.Error())
 		return err
 	}
+	db.logger.Info("song successfully added")
 	return nil
 }
 
@@ -281,17 +283,21 @@ func (db *Db) GetSongText(group string, song string) (string, error) {
 		return "", err
 	}
 
-	transaction.Commit()
+	err = transaction.Commit()
+	if err != nil {
+		db.logger.Error("failed to commit transaction: ", err.Error())
+		return "", err
+	}
 	return text, nil
 }
 
-func (db *Db) DeleteSong(group string, song string) error {
-	if group == "" || song == "" {
+func (db *Db) DeleteSong(song LibraryEntry) error {
+	if song.Group == "" || song.Song == "" {
 		db.logger.Error("invalid use of DeleteSong: one of the parameters is empty")
 		return ErrInvalidData
 	}
 
-	db.logger.Info("deleting song, group: '", group, "', song: '", song, "'")
+	db.logger.Info("deleting song, group: '", song.Group, "', song: '", song.Song, "'")
 	transaction, err := db.connection.Begin()
 	if err != nil {
 		db.logger.Error("failed to start transaction: ", err)
@@ -299,7 +305,7 @@ func (db *Db) DeleteSong(group string, song string) error {
 	}
 	defer transaction.Rollback()
 
-	group_id, err := db.getGroupID(group, transaction)
+	group_id, err := db.getGroupID(song.Group, transaction)
 	if err != nil {
 		return err
 	} else if group_id == -1 {
@@ -307,7 +313,7 @@ func (db *Db) DeleteSong(group string, song string) error {
 		db.logger.Error(err.Error())
 		return err
 	}
-	_, err = transaction.Exec(delete_song_query, group_id, song)
+	_, err = transaction.Exec(delete_song_query, group_id, song.Song)
 	if err != nil {
 		db.logger.Error("failed to delete song: ", err.Error())
 		return err
@@ -318,6 +324,7 @@ func (db *Db) DeleteSong(group string, song string) error {
 		db.logger.Error("failed to commit transaction: ", err.Error())
 		return err
 	}
+	db.logger.Info("deletion successful")
 	return nil
 }
 
@@ -400,17 +407,17 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint) ([]Libra
 	return result, nil
 }
 
-func (db *Db) UpdateSong(group, name, new_group, new_name, new_text, new_url string) error {
-	if group == "" || name == "" {
+func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_url string) error {
+	if song.Group == "" || song.Song == "" {
 		db.logger.Error("invalid use of UpdateSong: group and/or song name is empty")
 		return ErrInvalidData
 	} else if new_group == "" && new_name == "" && new_text == "" && new_url == "" {
 		// nothing to update
-		db.logger.Debug("empty update: group '", group, "', song '", name, "'")
+		db.logger.Debug("empty update: group '", song.Group, "', song '", song.Song, "'")
 		return nil
 	}
 
-	db.logger.Info("updating song '", name, "', group '", group, "'")
+	db.logger.Info("updating song '", song.Song, "', group '", song.Group, "'")
 	transaction, err := db.connection.Begin()
 	if err != nil {
 		db.logger.Error("failed to start transaction: ", err.Error())
@@ -419,7 +426,7 @@ func (db *Db) UpdateSong(group, name, new_group, new_name, new_text, new_url str
 	defer transaction.Rollback()
 
 	// get song id
-	rows, err := transaction.Query(get_song_id_query, name, group)
+	rows, err := transaction.Query(get_song_id_query, song.Song, song.Group)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to get song id: ", err.Error())
@@ -462,6 +469,7 @@ func (db *Db) UpdateSong(group, name, new_group, new_name, new_text, new_url str
 			arg_idx++
 		}
 		update_song_query += fmt.Sprintf(update_song_end_fmt, arg_idx)
+		db.logger.Debug("resulting query: ", update_song_query)
 
 		if new_group == "" {
 			_, err = transaction.Exec(update_song_query, new_name, song_id)
@@ -493,6 +501,8 @@ func (db *Db) UpdateSong(group, name, new_group, new_name, new_text, new_url str
 			arg_idx++
 		}
 		update_song_info_query += fmt.Sprintf(update_song_info_end_fmt, arg_idx)
+		db.logger.Debug("resulting query: ", update_song_info_query)
+
 		if new_text == "" {
 			_, err = transaction.Exec(update_song_info_query, new_url, song_id)
 		} else if new_url == "" {
