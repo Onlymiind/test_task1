@@ -14,35 +14,40 @@ import (
 )
 
 const (
-	add_song_query          = "add_song"
-	add_song_info_query     = "add_song_info"
-	add_group_query         = "add_group"
-	get_group_id_query      = "get_group"
-	get_song_text_query     = "get_song_text"
-	delete_song_query       = "delete_song"
-	get_library_query       = "get_all"
-	get_library_count_query = "get_all_count"
-	get_song_id_query       = "get_song_id"
+	addSongQuery         = "add_song"
+	addSongInfoQuery     = "add_song_info"
+	addGroupQuery        = "add_group"
+	getGroupIdQuery      = "get_group"
+	getSongTextQuery     = "get_song_text"
+	deleteSongQuery      = "delete_song"
+	getLibraryQuery      = "get_all"
+	getLibraryCountQuery = "get_all_count"
+	getSongIdQuery       = "get_song_id"
 
-	get_library_filter_base             = "SELECT name, song_name, release_date FROM groups JOIN songs ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id WHERE"
-	get_library_filter_count_base       = "SELECT COUNT(*) FROM groups JOIN songs ON groups.id = songs.group_id WHERE"
-	get_library_filter_group_fmt        = " name LIKE $%d"
-	get_library_filter_song_fmt         = " song_name LIKE $%d"
-	get_library_filter_release_date_fmt = " release_date = $%d"
-	get_library_filter_count_end        = ";"
-	get_library_filter_pagination_fmt   = " ORDER BY name, song_name, release_date LIMIT $%d OFFSET $%d;"
+	getLibraryFilterBase = "SELECT name, song_name, release_date FROM groups JOIN songs" +
+		" ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id WHERE"
+	getLibraryFilterCountBase = "SELECT COUNT(*) FROM groups JOIN songs" +
+		" ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id WHERE"
+	getLibraryFilterGroupFmt       = " name LIKE $%d"
+	getLibraryFilterSongFmt        = " song_name LIKE $%d"
+	getLibraryFilterReleaseDateFmt = " release_date = $%d"
+	getLibraryFilterCountEnd       = ";"
+	getLibraryFilterPaginationFmt  = " ORDER BY name, song_name, release_date LIMIT $%d OFFSET $%d;"
 
-	update_song_base             = "UPDATE songs SET"
-	update_song_group_fmt        = " group_id = $%d"
-	update_song_name_fmt         = " song_name = $%d"
-	update_song_release_date_fmt = " release_date = $%d"
-	update_song_end_fmt          = " WHERE id = $%d;"
+	updateSongBase           = "UPDATE songs SET"
+	updateSongGroupFmt       = " group_id = $%d"
+	updateSongNameFmt        = " song_name = $%d"
+	updateSongReleaseDateFmt = " release_date = $%d"
+	updateSongEndFmt         = " WHERE id = $%d;"
 
-	update_song_info_base             = "UPDATE song_info SET"
-	update_song_info_text_fmt         = " lyrics = $%d"
-	update_song_info_url_fmt          = " url = $%d"
-	update_song_info_release_date_fmt = " release_date = $%d"
-	update_song_info_end_fmt          = " WHERE song_id = $%d;"
+	updateSongInfoBase           = "UPDATE song_info SET"
+	updateSongInfoTextFmt        = " lyrics = $%d"
+	updateSongInfoUrlFmt         = " url = $%d"
+	updateSongInfoReleaseDateFmt = " release_date = $%d"
+	updateSongInfoEndFmt         = " WHERE song_id = $%d;"
+
+	internalDateFmt = "2006-01-02"
+	DateFmt         = "02.01.2006"
 )
 
 var (
@@ -120,53 +125,53 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 	logger.Info("connected to the database")
 
 	logger.Debug("preparing queries")
-	_, err = connection.Prepare(add_group_query, "INSERT INTO groups(name) VALUES ($1) RETURNING id;")
+	_, err = connection.Prepare(addGroupQuery, "INSERT INTO groups(name) VALUES ($1) RETURNING id;")
 	if err != nil {
-		logger.Error("failed to prepare ", add_group_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", addGroupQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_group_id_query, "SELECT id FROM groups WHERE name = $1 LIMIT 1;")
+	_, err = connection.Prepare(getGroupIdQuery, "SELECT id FROM groups WHERE name = $1 LIMIT 1;")
 	if err != nil {
-		logger.Error("failed to prepare ", get_group_id_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", getGroupIdQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(add_song_query, "INSERT INTO songs(group_id, song_name) VALUES($1, $2) RETURNING id;")
+	_, err = connection.Prepare(addSongQuery, "INSERT INTO songs(group_id, song_name) VALUES($1, $2) RETURNING id;")
 	if err != nil {
-		logger.Error("failed to prepare ", add_song_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", addSongQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(add_song_info_query, "INSERT INTO song_info(song_id, lyrics, url, release_date) VALUES($1, $2, $3, $4);")
+	_, err = connection.Prepare(addSongInfoQuery, "INSERT INTO song_info(song_id, lyrics, url, release_date) VALUES($1, $2, $3, $4);")
 	if err != nil {
-		logger.Error("failed to prepare ", add_song_info_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", addSongInfoQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_song_text_query, "SELECT lyrics FROM song_info WHERE song_id ="+
+	_, err = connection.Prepare(getSongTextQuery, "SELECT lyrics FROM song_info WHERE song_id ="+
 		" (SELECT id FROM songs WHERE group_id = $1 AND song_name = $2);")
 	if err != nil {
-		logger.Error("failed to prepare ", get_song_text_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", getSongTextQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(delete_song_query, "DELETE FROM songs WHERE group_id = $1 AND song_name = $2;")
+	_, err = connection.Prepare(deleteSongQuery, "DELETE FROM songs WHERE group_id = $1 AND song_name = $2;")
 	if err != nil {
-		logger.Error("failed to prepare ", delete_song_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", deleteSongQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_library_query, "SELECT name, song_name, release_date FROM groups JOIN songs"+
+	_, err = connection.Prepare(getLibraryQuery, "SELECT name, song_name, release_date FROM groups JOIN songs"+
 		" ON groups.id = songs.group_id JOIN song_info ON songs.id = song_info.song_id ORDER BY name, song_name, release_date LIMIT $1 OFFSET $2;")
 	if err != nil {
-		logger.Error("failed to prepare ", get_library_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", getLibraryQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_library_count_query, "SELECT COUNT(*) FROM groups JOIN songs"+
+	_, err = connection.Prepare(getLibraryCountQuery, "SELECT COUNT(*) FROM groups JOIN songs"+
 		" ON groups.id = songs.group_id;")
 	if err != nil {
-		logger.Error("failed to prepare ", get_library_count_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", getLibraryCountQuery, " query: ", err.Error())
 		return nil
 	}
-	_, err = connection.Prepare(get_song_id_query, "SELECT id FROM songs WHERE song_name = $1"+
+	_, err = connection.Prepare(getSongIdQuery, "SELECT id FROM songs WHERE song_name = $1"+
 		" AND group_id = (SELECT id FROM groups WHERE name = $2);")
 	if err != nil {
-		logger.Error("failed to prepare ", get_song_id_query, " query: ", err.Error())
+		logger.Error("failed to prepare ", getSongIdQuery, " query: ", err.Error())
 		return nil
 	}
 	logger.Debug("preparing queries: done")
@@ -176,7 +181,7 @@ func Init(user, password, host string, port uint16, db_name, migrations_path str
 
 func (db *Db) getGroupID(name string, transaction *pgx.Tx) (int64, error) {
 	db.logger.Info("trying to retrieve group id, name: '", name, "'")
-	rows, err := transaction.Query(get_group_id_query, name)
+	rows, err := transaction.Query(getGroupIdQuery, name)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to get group id: ", err.Error())
@@ -200,7 +205,7 @@ func (db *Db) getOrAddGroupID(name string, transaction *pgx.Tx) (int64, error) {
 		return -1, err
 	} else if group_id == -1 {
 		db.logger.Info("group '", name, "' not found, adding it")
-		rows, err := transaction.Query(add_group_query, name)
+		rows, err := transaction.Query(addGroupQuery, name)
 		defer rows.Close()
 		if err != nil {
 			db.logger.Error("failed to add new group: ", err.Error())
@@ -230,15 +235,15 @@ func (db *Db) validatePageIndex(query_result *pgx.Rows, page_idx, page_size uint
 		db.logger.Error("failed to retrieve count: ", err.Error())
 		return 0, err
 	}
-	max_page := count / int64(page_size)
+	page_count := count / int64(page_size)
 	if count%int64(page_size) != 0 {
-		max_page++
+		page_count++
 	}
-	if int64(page_idx) >= max_page {
-		db.logger.Error("page ", page_idx, " out of bounds, max page: ", max_page)
+	if page_idx != 0 && int64(page_idx) >= page_count {
+		db.logger.Error("page ", page_idx, " out of bounds, max page: ", page_count)
 		return 0, ErrPageOutOfBounds
 	}
-	return uint(max_page) + 1, nil
+	return uint(page_count), nil
 }
 
 func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
@@ -253,7 +258,7 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 	defer transaction.Rollback()
 
 	// validate page index
-	count_rows, err := transaction.Query(get_library_count_query)
+	count_rows, err := transaction.Query(getLibraryCountQuery)
 	defer count_rows.Close()
 	if err != nil {
 		db.logger.Error("failed to get library entries count: ", err.Error())
@@ -266,7 +271,7 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 	count_rows.Close()
 
 	// get the result
-	rows, err := transaction.Query(get_library_query, page_size, page_idx*page_size)
+	rows, err := transaction.Query(getLibraryQuery, page_size, page_idx*page_size)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to retrieve library: ", err.Error())
@@ -281,10 +286,11 @@ func (db *Db) getAll(page_idx, page_size uint) (LibraryPage, error) {
 			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
 			return LibraryPage{}, err
 		}
-		buffer.ReleaseDate = time_buffer.Format("02.01.2006")
+		buffer.ReleaseDate = time_buffer.Format(DateFmt)
 		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
 		result.Entries = append(result.Entries, buffer)
 	}
+	rows.Close()
 
 	err = transaction.Commit()
 	if err != nil {
@@ -313,7 +319,7 @@ func (db *Db) AddSong(group string, name string, text string, url string, date t
 		db.logger.Error("failed to get group id: ", err.Error())
 		return err
 	}
-	rows, err := db.connection.Query(add_song_query, group_id, name)
+	rows, err := db.connection.Query(addSongQuery, group_id, name)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to add song: ", err.Error())
@@ -329,7 +335,9 @@ func (db *Db) AddSong(group string, name string, text string, url string, date t
 		db.logger.Error("failed to retrieve song id from query result: ", err.Error())
 		return err
 	}
-	_, err = db.connection.Exec(add_song_info_query, song_id, text, url, date.Format("2006-01-02"))
+	rows.Close()
+
+	_, err = db.connection.Exec(addSongInfoQuery, song_id, text, url, date.Format(internalDateFmt))
 	if err != nil {
 		db.logger.Error("failed to add song details: ", err.Error())
 		return err
@@ -366,7 +374,7 @@ func (db *Db) GetSongText(group string, song string) (string, error) {
 		db.logger.Error(err.Error())
 		return "", err
 	}
-	rows, err := db.connection.Query(get_song_text_query, group_id, song)
+	rows, err := db.connection.Query(getSongTextQuery, group_id, song)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to get song text: ", err.Error())
@@ -378,11 +386,12 @@ func (db *Db) GetSongText(group string, song string) (string, error) {
 		return "", err
 	}
 	var text string
-	err = rows.Scan(text)
+	err = rows.Scan(&text)
 	if err != nil {
 		db.logger.Error("failed to retrieve song text: ", err.Error())
 		return "", err
 	}
+	rows.Close()
 
 	err = transaction.Commit()
 	if err != nil {
@@ -414,7 +423,7 @@ func (db *Db) DeleteSong(song LibraryEntry) error {
 		db.logger.Error(err.Error())
 		return err
 	}
-	_, err = transaction.Exec(delete_song_query, group_id, song.Song)
+	_, err = transaction.Exec(deleteSongQuery, group_id, song.Song)
 	if err != nil {
 		db.logger.Error("failed to delete song: ", err.Error())
 		return err
@@ -432,16 +441,16 @@ func (db *Db) DeleteSong(song LibraryEntry) error {
 func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_date *time.Time) (LibraryPage, error) {
 	db.logger.Info("retrieving filtered library data, group '", group,
 		"' song '", song, "', page ", page_idx, ", page size ", page_size)
-	if group == "" && song == "" {
+	if group == "" && song == "" && release_date == nil {
 		db.logger.Info("filter is empty")
 		return db.getAll(page_idx, page_size)
 	}
 
-	query := get_library_filter_base
-	count_query := get_library_filter_count_base
+	query := getLibraryFilterBase
+	count_query := getLibraryFilterCountBase
 	arg_idx := 1
 	if group != "" {
-		filter_group := fmt.Sprintf(get_library_filter_group_fmt, arg_idx)
+		filter_group := fmt.Sprintf(getLibraryFilterGroupFmt, arg_idx)
 		query += filter_group
 		count_query += filter_group
 		if song != "" || release_date != nil {
@@ -451,7 +460,7 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 		arg_idx++
 	}
 	if song != "" {
-		filter_song := fmt.Sprintf(get_library_filter_song_fmt, arg_idx)
+		filter_song := fmt.Sprintf(getLibraryFilterSongFmt, arg_idx)
 		query += filter_song
 		count_query += filter_song
 		arg_idx++
@@ -461,13 +470,13 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 		}
 	}
 	if release_date != nil {
-		filter_date := fmt.Sprintf(get_library_filter_release_date_fmt, arg_idx)
+		filter_date := fmt.Sprintf(getLibraryFilterReleaseDateFmt, arg_idx)
 		query += filter_date
 		count_query += filter_date
 		arg_idx++
 	}
-	query += fmt.Sprintf(get_library_filter_pagination_fmt, arg_idx, arg_idx+1)
-	count_query += get_library_filter_count_end
+	query += fmt.Sprintf(getLibraryFilterPaginationFmt, arg_idx, arg_idx+1)
+	count_query += getLibraryFilterCountEnd
 	db.logger.Debug("resulting query: ", query)
 
 	transaction, err := db.connection.Begin()
@@ -482,13 +491,13 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 	if group == "" && release_date == nil {
 		count_rows, err = transaction.Query(count_query, song)
 	} else if song == "" && release_date == nil {
-		count_rows, err = transaction.Query(query, group)
+		count_rows, err = transaction.Query(count_query, group)
 	} else if release_date == nil {
-		count_rows, err = transaction.Query(query, group, song)
+		count_rows, err = transaction.Query(count_query, group, song)
 	} else if group == "" && song == "" {
 		count_rows, err = transaction.Query(count_query, *release_date)
 	} else {
-		count_rows, err = transaction.Query(query, group, song, *release_date)
+		count_rows, err = transaction.Query(count_query, group, song, *release_date)
 	}
 	defer count_rows.Close()
 	if err != nil {
@@ -512,7 +521,7 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 	} else if group == "" && song == "" {
 		rows, err = transaction.Query(query, release_date, page_size, page_idx*page_size)
 	} else {
-		rows, err = transaction.Query(query, group, song, release_date, page_size, page_idx*page_size)
+		rows, err = transaction.Query(query, group, song, release_date.Format(internalDateFmt), page_size, page_idx*page_size)
 	}
 	defer rows.Close()
 	if err != nil {
@@ -529,10 +538,11 @@ func (db *Db) GetFiltered(group, song string, page_idx, page_size uint, release_
 			db.logger.Error("failed to retrieve library entry: ", err.Error(), ", retrieved: ", len(result.Entries))
 			return LibraryPage{}, err
 		}
-		buffer.ReleaseDate = time_buffer.Format("02.01.2006")
+		buffer.ReleaseDate = time_buffer.Format(DateFmt)
 		db.logger.Debug("adding entry: group '", buffer.Group, "', song '", buffer.Song, "'")
 		result.Entries = append(result.Entries, buffer)
 	}
+	rows.Close()
 
 	if err = transaction.Commit(); err != nil {
 		db.logger.Error("failed to commit transaction: ", err.Error())
@@ -560,7 +570,7 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 	defer transaction.Rollback()
 
 	// get song id
-	rows, err := transaction.Query(get_song_id_query, song.Song, song.Group)
+	rows, err := transaction.Query(getSongIdQuery, song.Song, song.Group)
 	defer rows.Close()
 	if err != nil {
 		db.logger.Error("failed to get song id: ", err.Error())
@@ -571,17 +581,18 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 		return err
 	}
 	var song_id int64
-	err = rows.Scan(song_id)
+	err = rows.Scan(&song_id)
 	if err != nil {
 		db.logger.Error("failed to retrieve song id: ", err.Error())
 		return err
 	}
+	rows.Close()
 
 	// update group and/or song name
 	if new_group != "" || new_name != "" {
 		db.logger.Info("updating song name and/or group. New name: '",
 			new_name, "', new group: '", new_group, "'")
-		update_song_query := update_song_base
+		update_song_query := updateSongBase
 		arg_idx := 1
 		var new_group_id int64
 		if new_group != "" {
@@ -591,38 +602,27 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 				db.logger.Error("failed to get new group id: ", err.Error())
 				return err
 			}
-			update_song_query += fmt.Sprintf(update_song_group_fmt, arg_idx)
-			if new_name != "" || new_release_date != nil {
+			update_song_query += fmt.Sprintf(updateSongGroupFmt, arg_idx)
+			if new_name != "" {
 				update_song_query += ","
 			}
 			arg_idx++
 		}
 		if new_name != "" {
 			db.logger.Info("new song name: '", new_name, "'")
-			update_song_query += fmt.Sprintf(update_song_name_fmt, arg_idx)
-			if new_release_date != nil {
-				update_song_query += ","
-			}
+			update_song_query += fmt.Sprintf(updateSongNameFmt, arg_idx)
 			arg_idx++
 		}
-		if new_release_date != nil {
-			db.logger.Info("new release date: ", new_release_date.Format("02.01.2006"))
-			update_song_query += fmt.Sprintf(update_song_info_release_date_fmt, arg_idx)
-			arg_idx++
-		}
-		update_song_query += fmt.Sprintf(update_song_end_fmt, arg_idx)
+
+		update_song_query += fmt.Sprintf(updateSongEndFmt, arg_idx)
 		db.logger.Debug("resulting query: ", update_song_query)
 
-		if new_group == "" && new_release_date == nil {
+		if new_group == "" {
 			_, err = transaction.Exec(update_song_query, new_name, song_id)
-		} else if new_name == "" && new_release_date == nil {
+		} else if new_name == "" {
 			_, err = transaction.Exec(update_song_query, new_group_id, song_id)
-		} else if new_release_date == nil {
-			_, err = transaction.Exec(update_song_query, new_group_id, new_name, song_id)
-		} else if new_group == "" && new_name == "" {
-			_, err = transaction.Exec(update_song_query, new_release_date, song_id)
 		} else {
-			_, err = transaction.Exec(update_song_query, new_group_id, new_name, new_release_date, song_id)
+			_, err = transaction.Exec(update_song_query, new_group_id, new_name, song_id)
 		}
 		if err != nil {
 			db.logger.Error("failed to update song: ", err.Error())
@@ -631,30 +631,42 @@ func (db *Db) UpdateSong(song LibraryEntry, new_group, new_name, new_text, new_u
 	}
 
 	//update song info
-	if new_text != "" || new_url != "" {
+	if new_text != "" || new_url != "" || new_release_date != nil {
 		db.logger.Info("updating song text and/or url")
-		update_song_info_query := update_song_base
+		update_song_info_query := updateSongInfoBase
 		arg_idx := 1
 		if new_text != "" {
-			update_song_info_query += fmt.Sprintf(update_song_info_text_fmt, arg_idx)
-			if new_url != "" {
+			update_song_info_query += fmt.Sprintf(updateSongInfoTextFmt, arg_idx)
+			if new_url != "" || new_release_date != nil {
 				update_song_info_query += ","
 			}
 			arg_idx++
 		}
 		if new_url != "" {
-			update_song_info_query += fmt.Sprintf(update_song_info_url_fmt, arg_idx)
+			update_song_info_query += fmt.Sprintf(updateSongInfoUrlFmt, arg_idx)
+			if new_release_date != nil {
+				update_song_info_query += ","
+			}
 			arg_idx++
 		}
-		update_song_info_query += fmt.Sprintf(update_song_info_end_fmt, arg_idx)
+		if new_release_date != nil {
+			db.logger.Info("new release date: ", new_release_date.Format(DateFmt))
+			update_song_info_query += fmt.Sprintf(updateSongInfoReleaseDateFmt, arg_idx)
+			arg_idx++
+		}
+		update_song_info_query += fmt.Sprintf(updateSongInfoEndFmt, arg_idx)
 		db.logger.Debug("resulting query: ", update_song_info_query)
 
-		if new_text == "" {
+		if new_text == "" && new_release_date == nil {
 			_, err = transaction.Exec(update_song_info_query, new_url, song_id)
-		} else if new_url == "" {
+		} else if new_url == "" && new_release_date == nil {
 			_, err = transaction.Exec(update_song_info_query, new_text, song_id)
-		} else {
+		} else if new_release_date == nil {
 			_, err = transaction.Exec(update_song_info_query, new_text, new_url, song_id)
+		} else if new_text == "" && new_url == "" {
+			_, err = transaction.Exec(update_song_info_query, new_release_date, song_id)
+		} else {
+			_, err = transaction.Exec(update_song_info_query, new_text, new_url, new_release_date, song_id)
 		}
 		if err != nil {
 			db.logger.Error("failed to update song info: ", err.Error())

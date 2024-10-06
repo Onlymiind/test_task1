@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -115,7 +114,7 @@ func (s *Server) getAll(writer http.ResponseWriter, request *http.Request) {
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		date_val, err := time.Parse("02.01.2006", query[release_date_key][0])
+		date_val, err := time.Parse(database.DateFmt, query[release_date_key][0])
 		if err != nil {
 			s.logger.Error("failed to parse release date: ", err.Error())
 			writer.WriteHeader(http.StatusBadRequest)
@@ -128,6 +127,9 @@ func (s *Server) getAll(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		s.writeDBResponse(err, writer)
 		return
+	}
+	if result.Entries == nil {
+		result.Entries = make([]database.LibraryEntry, 0, 0)
 	}
 
 	result_bytes, err := json.Marshal(result)
@@ -161,7 +163,8 @@ func (s *Server) getSong(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	text, err := s.db.GetSongText(group, song)
-	if !s.writeDBResponse(err, writer) {
+	if err != nil {
+		s.writeDBResponse(err, writer)
 		return
 	}
 
@@ -180,6 +183,8 @@ func (s *Server) getSong(writer http.ResponseWriter, request *http.Request) {
 	}
 	if page_idx >= len(verses) {
 		s.logger.Error("page index out of bounds, size: ", len(verses), ", index: ", page_idx)
+		writer.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	result := songTextResponse{PageIndex: page_idx, PageCount: len(verses), Verse: verses[page_idx]}
@@ -269,7 +274,7 @@ func (s *Server) addSong(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	get_params := url.Values{"group": {song.Group}, "name": {song.Song}}
-	request_url := path.Join(s.song_info_url, song_info_path)
+	request_url := strings.Join([]string{s.song_info_url, song_info_path}, "/")
 	request_url += "?" + get_params.Encode()
 	s.logger.Info("sending song info request to: ", request_url)
 	response, err := http.Get(request_url)
@@ -311,7 +316,7 @@ func (s *Server) addSong(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	date, err := time.Parse("02.01.2006", song_data.ReleaseDate)
+	date, err := time.Parse(database.DateFmt, song_data.ReleaseDate)
 	if err != nil {
 		s.logger.Error("failed to parse release date")
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -369,6 +374,9 @@ func (s *Server) writeDBResponse(err error, writer http.ResponseWriter) bool {
 	case database.ErrSongNotFound:
 		writer.WriteHeader(http.StatusNotFound)
 		writer.Write(([]byte)("non-existent song"))
+	case database.ErrPageOutOfBounds:
+		writer.WriteHeader(http.StatusBadRequest)
+		writer.Write(([]byte)("page out of bounds"))
 	case nil:
 		writer.WriteHeader(http.StatusOK)
 		return true
@@ -385,7 +393,7 @@ func (s *Server) parseUintGetParam(query url.Values, key string, writer http.Res
 		return 0, false
 	}
 
-	val, err := strconv.ParseUint(query[page_size_key][0], 10, 32)
+	val, err := strconv.ParseUint(query[key][0], 10, 32)
 	if err != nil {
 		s.logger.Error("failed to parse ", key, ": ", err.Error())
 		writer.WriteHeader(http.StatusBadRequest)
