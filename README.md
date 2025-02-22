@@ -2,7 +2,8 @@
 `go build cmd/server/main.go`
 
 ## Использование:
-`<path/to/server binary> <path/to/ .env file>`
+- `<path/to/server binary> <path/to/ .env file>`
+- Описание API см. в `openapi.yaml`
 
 ## Переменные конфигурации:
 - ADDRESS - TCP адрес сервера
